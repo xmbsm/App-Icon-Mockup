@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer'
 
 export default defineConfig(({ command }) => {
-  const base = command === 'serve' ? '/' : '/app-icon-mockup/'
+  const base = '/'
   return {
     plugins: [
       react(),
