@@ -1,0 +1,1170 @@
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import Cropper from 'react-easy-crop';
+import { getColor, getPalette } from 'colorthief';
+import { motion, AnimatePresence } from 'framer-motion';
+import domtoimage from 'dom-to-image-more';
+import ControlsPanel from './components/ControlsPanel';
+import MobileControls from './components/MobileControls';
+import LanguageSwitcher from './components/LanguageSwitcher';
+import { useMediaQuery } from './hooks/useMediaQuery';
+import { useLanguage } from './i18n/useLanguage.jsx';
+import {
+  rgbToHex,
+  shuffleArray,
+  getComplementary,
+  lighten,
+} from './utils/colors';
+import { createImage, getCroppedImg } from './utils/image';
+import LiquidGlassDock from './components/LiquidGlassDock';
+import CustomAppIcon from './components/CustomAppIcon';
+import AppIcon from './components/AppIcon';
+import {
+  SF_PRO_REGULAR,
+  SF_PRO_MEDIUM,
+  SF_PRO_BOLD,
+  globalStyles,
+  deviceOptions,
+  ratioMap,
+  wallpaperOptions,
+  defaultGridApps,
+  defaultDockApps,
+  popularGridApps,
+  popularDockApps,
+  base
+} from './constants';
+
+export default function IOSHomeScreen() {
+  const { t, language } = useLanguage();
+  const [customAppName, setCustomAppName] = useState(language === 'zh' ? "您的应用" : "Your App");
+  const [customAppIcon, setCustomAppIcon] = useState(null);
+  const [focusMode, setFocusMode] = useState(false);
+  const [wallpaperBlend, setWallpaperBlend] = useState(100);
+  const fileInputRef = useRef(null);
+  const [showCrop, setShowCrop] = useState(false);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [rawIcon, setRawIcon] = useState(null);
+  const [viewMode, setViewMode] = useState('full');
+  const [containerStyle, setContainerStyle] = useState('mesh');
+  const [solidColor, setSolidColor] = useState('#ededed');
+  const [gradientMain, setGradientMain] = useState('#ededed');
+  const [gradientSecondary, setGradientSecondary] = useState('#ededed');
+  const [meshColors, setMeshColors] = useState(['#ededed', '#e0e0e0', '#cccccc']);
+  const [wallpaperMeshColors, setWallpaperMeshColors] = useState(['#ededed', '#e0e0e0', '#cccccc']);
+  const [wallpaperColors, setWallpaperColors] = useState(['#3b82f6', '#8b5cf6', '#f59e0b', '#10b981']);
+  const [palette, setPalette] = useState([
+    [237, 237, 237], [200, 200, 200], [180, 180, 180], [220, 220, 220], [255, 255, 255]
+  ]);
+  const [frameRatio, setFrameRatio] = useState('4:3');
+  const frameRef = useRef(null);
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const [selectedSolid, setSelectedSolid] = useState(0);
+  const [selectedGradient, setSelectedGradient] = useState(0);
+  const [selectedMesh, setSelectedMesh] = useState(0);
+  const [wallpaperBgColor, setWallpaperBgColor] = useState('#38bdf8');
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [hideOtherIcons, setHideOtherIcons] = useState(false);
+  const [deviceZoom, setDeviceZoom] = useState(0.9);
+  const [randomizeKey, setRandomizeKey] = useState(0);
+  const [selectedDevice, setSelectedDevice] = useState('cosmic-orange');
+  const [selectedWallpaper, setSelectedWallpaper] = useState('ios26-light');
+  const [edgeHighlighting, setEdgeHighlighting] = useState(true);
+  const [drawerSnap, setDrawerSnap] = useState(0.13);
+
+  const isMobile = useMediaQuery('(max-width: 768px)')
+  const mainContentRef = useRef(null);
+  const [containerDims, setContainerDims] = useState(null);
+  const [frameSize, setFrameSize] = useState({ width: 0, height: 0, scale: 1 });
+  const [isResizing, setIsResizing] = useState(false);
+
+  const getUIScale = () => {
+    const device = deviceOptions[selectedDevice];
+    return device.screenWidth / 402;
+  };
+
+  const [popularApps, setPopularApps] = useState(false);
+  const [gridApps, setGridApps] = useState(defaultGridApps);
+  const [dockApps, setDockApps] = useState(defaultDockApps);
+
+  const handlePopularAppsToggle = (enabled) => {
+    setPopularApps(enabled);
+    if (enabled) {
+      setGridApps(popularGridApps);
+      setDockApps(popularDockApps);
+    } else {
+      setGridApps(defaultGridApps);
+      setDockApps(defaultDockApps);
+    }
+    setRandomizeKey(prev => prev + 1);
+  };
+
+  const randomizeAppPositions = () => {
+    const currentGrid = popularApps ? [...popularGridApps] : [...defaultGridApps];
+    const currentDock = popularApps ? [...popularDockApps] : [...defaultDockApps];
+    setGridApps(shuffleArray(currentGrid));
+    setDockApps(shuffleArray(currentDock));
+    setRandomizeKey(prev => prev + 1);
+  };
+
+  const calculateSizes = useCallback(() => {
+    if (!mainContentRef.current) return;
+
+    const parentWidth = mainContentRef.current.clientWidth - 40;
+    const parentHeight = mainContentRef.current.clientHeight - 40;
+    
+    if (parentWidth <= 0 || parentHeight <= 0) {
+      return;
+    }
+
+    const ratioParts = ratioMap[frameRatio];
+    const targetAspectRatio = ratioParts.w / ratioParts.h;
+    
+    let newWidth, newHeight;
+    
+    if (parentWidth / parentHeight > targetAspectRatio) {
+      newHeight = parentHeight;
+      newWidth = newHeight * targetAspectRatio;
+    } else {
+      newWidth = parentWidth;
+      newHeight = newWidth / targetAspectRatio;
+    }
+    
+    const device = deviceOptions[selectedDevice];
+    const baseWidth = device.frameWidth;
+    const baseHeight = device.frameHeight;
+    
+    const maxWidth = newWidth * 0.9;
+    const maxHeight = newHeight * 0.9;
+    
+    const scaleX = maxWidth / baseWidth;
+    const scaleY = maxHeight / baseHeight;
+    const scale = Math.min(scaleX, scaleY, 1);
+    
+    React.startTransition(() => {
+      setIsResizing(true);
+      setContainerDims({ width: newWidth, height: newHeight });
+      setFrameSize({
+        width: baseWidth * scale,
+        height: baseHeight * scale,
+        scale: scale
+      });
+      setTimeout(() => setIsResizing(false), 100);
+    });
+  }, [frameRatio, selectedDevice]);
+
+  useEffect(() => {
+    const mainEl = mainContentRef.current;
+    
+    calculateSizes();
+    
+    let resizeTimeout;
+    const debouncedCalculateSizes = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(calculateSizes, 16);
+    };
+    
+    const observer = new ResizeObserver(debouncedCalculateSizes);
+    if (mainEl) {
+        observer.observe(mainEl);
+    }
+    
+    window.addEventListener('resize', debouncedCalculateSizes);
+    
+    return () => {
+        clearTimeout(resizeTimeout);
+        if (mainEl) {
+            observer.unobserve(mainEl);
+        }
+        window.removeEventListener('resize', debouncedCalculateSizes);
+    };
+  }, [calculateSizes]);
+
+  useEffect(() => {
+    setPosition({ x: 0, y: 0 });
+    if (viewMode === 'full') {
+      setDeviceZoom(0.9);
+    } else {
+      setDeviceZoom(2.5);
+    }
+  }, [viewMode]);
+
+  const extractColorsWithColorThief = (imageUrl) => {
+    const img = new window.Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      try {
+        const dominant = getColor(img);
+        const pal = getPalette(img, 6);
+        setPalette(pal);
+        const rgbToHex = ([r, g, b]) => '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+        setSolidColor(lighten(rgbToHex(dominant), 0.5));
+        if (pal.length >= 2 && rgbToHex(pal[0]) !== rgbToHex(pal[1])) {
+          setGradientMain(rgbToHex(pal[0]));
+          setGradientSecondary(rgbToHex(pal[1]));
+        } else {
+          setGradientMain(rgbToHex(dominant));
+          setGradientSecondary(getComplementary(rgbToHex(dominant)));
+        }
+        let mesh = pal.slice(0, 4).map(rgbToHex);
+        while (mesh.length < 4) mesh.push(lighten(rgbToHex(dominant), 0.2 * mesh.length));
+        setMeshColors(mesh);
+        setWallpaperMeshColors(mesh);
+      } catch (e) {}
+    };
+    img.src = imageUrl;
+  };
+
+  useEffect(() => {
+    if (customAppIcon) {
+      extractColorsWithColorThief(customAppIcon);
+    }
+  }, [customAppIcon]);
+
+  useEffect(() => {
+    const currentWallpaper = wallpaperOptions.find(w => w.id === selectedWallpaper);
+    if (currentWallpaper?.suggestedBgColor) {
+      setWallpaperBgColor(currentWallpaper.suggestedBgColor);
+    }
+  }, [selectedWallpaper]);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const imageUrl = urlParams.get('imageUrl');
+    
+    if (imageUrl) {
+      try {
+        const decodedUrl = decodeURIComponent(imageUrl);
+        setRawIcon(decodedUrl);
+        setShowCrop(true);
+        
+        const newUrl = window.location.pathname;
+        window.history.replaceState(null, '', newUrl);
+      } catch (error) {
+        console.error('Error processing image URL parameter:', error);
+      }
+    }
+  }, []);
+
+  const getContainerBackground = () => {
+    if (containerStyle === 'solid') {
+      return solidColor;
+    } else if (containerStyle === 'mesh') {
+      const positions = [
+        '20% 30%', '80% 70%', '60% 20%', '70% 80%'
+      ];
+      return [
+        ...meshColors.map((color, i) =>
+          `radial-gradient(circle at ${positions[i % positions.length]}, ${color} 0%, transparent 70%)`
+        ),
+        `linear-gradient(120deg, ${meshColors[0]} 0%, ${meshColors[1] || meshColors[0]} 100%)`
+      ].join(',\n');
+    } else if (containerStyle === 'wallpaper') {
+      return wallpaperBgColor;
+    }
+    return solidColor;
+  };
+
+  const getWallpaperBackground = () => {
+    if (containerStyle === 'wallpaper') {
+      const selectedWallpaperFile = wallpaperOptions.find(w => w.id === selectedWallpaper)?.file || 'ios26-light.jpg';
+      return `url("${base}${selectedWallpaperFile}")`;
+    }
+    
+    if (!customAppIcon) {
+      return '#000000';
+    }
+    
+    const blendFactor = wallpaperBlend / 100;
+    
+    if (blendFactor === 0) {
+      return '#000000';
+    }
+    
+    if (containerStyle === 'solid') {
+      const hex = solidColor;
+      let c = hex.substring(1);
+      let frameRgb = [parseInt(c.substring(0,2),16),parseInt(c.substring(2,4),16),parseInt(c.substring(4,6),16)];
+      const blendedRgb = frameRgb.map(x => Math.round(x * blendFactor));
+      return `#${blendedRgb.map(x=>x.toString(16).padStart(2,'0')).join('')}`;
+    } else if (containerStyle === 'mesh') {
+      const blendedMeshColors = meshColors.map(color => {
+        let c = color.substring(1);
+        let frameRgb = [parseInt(c.substring(0,2),16),parseInt(c.substring(2,4),16),parseInt(c.substring(4,6),16)];
+        const blendedRgb = frameRgb.map(x => Math.round(x * blendFactor));
+        return `#${blendedRgb.map(x=>x.toString(16).padStart(2,'0')).join('')}`;
+      });
+      const positions = [
+        '20% 30%', '80% 70%', '60% 20%', '70% 80%'
+      ];
+      return [
+        ...blendedMeshColors.map((color, i) =>
+          `radial-gradient(circle at ${positions[i % positions.length]}, ${color} 0%, transparent 60%)`
+        ),
+        `linear-gradient(120deg, ${blendedMeshColors[0]} 0%, ${blendedMeshColors[1] || blendedMeshColors[0]} 100%)`
+      ].join(',\n');
+    }
+    const grayValue = Math.round(24 * blendFactor);
+    return `rgb(${grayValue}, ${grayValue}, ${grayValue + Math.round(4 * blendFactor)})`;
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadedFileName(file.name.replace(/\.[^/.]+$/, ''));
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setRawIcon(event.target?.result);
+        setShowCrop(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  }, []);
+
+  const handleCropSave = useCallback(async () => {
+    if (!rawIcon || !croppedAreaPixels) return;
+    const croppedImgUrl = await getCroppedImg(rawIcon, croppedAreaPixels);
+    setCustomAppIcon(croppedImgUrl);
+    setShowCrop(false);
+  }, [rawIcon, croppedAreaPixels]);
+
+  const handleIconClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleDragStart = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    setDragStart({
+      x: clientX - position.x,
+      y: clientY - position.y
+    });
+  };
+
+  const handleDrag = (e) => {
+    if (!isDragging) return;
+    if (e.touches) e.preventDefault();
+    
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    setPosition({
+      x: clientX - dragStart.x,
+      y: clientY - dragStart.y
+    });
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleDrag);
+      window.addEventListener('mouseup', handleDragEnd);
+      window.addEventListener('touchmove', handleDrag, { passive: false });
+      window.addEventListener('touchend', handleDragEnd);
+      window.addEventListener('touchcancel', handleDragEnd);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleDrag);
+      window.removeEventListener('mouseup', handleDragEnd);
+      window.removeEventListener('touchmove', handleDrag);
+      window.removeEventListener('touchend', handleDragEnd);
+      window.removeEventListener('touchcancel', handleDragEnd);
+    };
+  }, [isDragging, dragStart]);
+
+  const renderDock = () => {
+    const dockPositions = {
+      'dock-left': 0,
+      'dock-right': 3
+    };
+
+    let dockRenderCounter = 0;
+    const uiScale = getUIScale();
+
+    return (
+      <LiquidGlassDock
+        cornerRadius={`${32 * uiScale * frameSize.scale}px`}
+        uiScale={uiScale}
+        frameScale={frameSize.scale}
+        viewMode={viewMode}
+        isDragging={isDragging}
+        style={{
+          margin: '0 auto 0',
+          width: '98%',
+          height: `${85 * uiScale * frameSize.scale}px`,
+          position: 'relative',
+          zIndex: focusMode ? 20 : 1,
+          opacity: focusMode ? 0.9 : 1,
+          padding: `0 ${12 * uiScale * frameSize.scale}px`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+      >
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: `${26 * uiScale * frameSize.scale}px`,
+          width: '100%',
+          height: '100%'
+        }}>
+        {Array(4).fill(null).map((_, index) => {
+          const isCustomApp = index === dockPositions[viewMode];
+          const iconSize = 62 * uiScale * frameSize.scale;
+          
+          if (isCustomApp) {
+            return (
+              <CustomAppIcon
+                key="custom-dock-icon"
+                size={iconSize}
+                scale={uiScale * frameSize.scale}
+                customAppIcon={customAppIcon}
+                customAppName={customAppName}
+                edgeHighlighting={edgeHighlighting}
+                palette={palette}
+                onClick={handleIconClick}
+                hasLabel={false}
+                isFocused={focusMode}
+              />
+            );
+          } else {
+            const app = dockApps[dockRenderCounter++];
+            return (
+              <div key={`dock-${index}-${randomizeKey}`} style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                opacity: hideOtherIcons ? 0 : (focusMode ? 0.4 : 1),
+                visibility: hideOtherIcons ? 'hidden' : 'visible',
+                pointerEvents: hideOtherIcons ? 'none' : 'auto',
+                transition: 'opacity 0.3s ease'
+              }}>
+                <AppIcon 
+                  name={app?.name} 
+                  src={app?.src}
+                  nolabel={true}
+                  size={iconSize}
+                  scale={uiScale * frameSize.scale}
+                />
+              </div>
+            );
+          }
+        })}
+        </div>
+      </LiquidGlassDock>
+    );
+  };
+
+  const renderAppGrid = () => {
+    const positions = {
+      'full': gridApps.length,
+      'top-left': 0,
+      'top-right': 3,
+    };
+
+    let appRenderCounter = 0;
+    const uiScale = getUIScale();
+    const iconSize = 62 * uiScale * frameSize.scale;
+    const gridGap = 16 * uiScale * frameSize.scale;
+    const hideLabels = customAppName.trim() === '';
+    const rowGap = (hideLabels ? 30 : 24) * uiScale * frameSize.scale;
+
+    return (
+      <div className="app-grid" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: `${gridGap}px`,
+        rowGap: `${rowGap}px`,
+        marginTop: `${35 * uiScale * frameSize.scale}px`,
+        justifyItems: 'center',
+        position: 'relative',
+        zIndex: focusMode ? 20 : 1
+      }}>
+        {Array(gridApps.length + 1).fill(null).map((_, index) => {
+          const isCustomApp = index === positions[viewMode];
+
+          if (isCustomApp) {
+            return (
+              <CustomAppIcon
+                key="custom-grid-icon"
+                size={iconSize}
+                scale={uiScale * frameSize.scale}
+                customAppIcon={customAppIcon}
+                customAppName={customAppName}
+                edgeHighlighting={edgeHighlighting}
+                palette={palette}
+                onClick={handleIconClick}
+                hasLabel={customAppName.trim() !== ''}
+                isFocused={focusMode}
+              />
+            );
+          } else {
+            const app = gridApps[appRenderCounter++];
+            return (
+              <div key={`${index}-${randomizeKey}`} style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                opacity: hideOtherIcons ? 0 : (focusMode ? 0.4 : 1),
+                visibility: hideOtherIcons ? 'hidden' : 'visible',
+                pointerEvents: hideOtherIcons ? 'none' : 'auto',
+                transition: 'opacity 0.3s ease'
+              }}>
+                <AppIcon
+                  name={app?.name}
+                  src={app?.src}
+                  size={iconSize}
+                  scale={uiScale * frameSize.scale}
+                  nolabel={customAppName.trim() === ''}
+                />
+              </div>
+            );
+          }
+        })}
+      </div>
+    );
+  };
+
+  const handleDownload = async () => {
+    if (!frameRef.current) return;
+
+    try {
+      const originalBorderRadius = frameRef.current.style.borderRadius;
+      
+      frameRef.current.style.borderRadius = '0px';
+      
+      await document.fonts.ready;
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const getDownloadBgColor = () => {
+        if (containerStyle === 'wallpaper') {
+          return wallpaperBgColor;
+        } else if (containerStyle === 'solid') {
+          return solidColor;
+        } else if (containerStyle === 'mesh') {
+          return meshColors[0] || '#ededed';
+        }
+        return 'transparent';
+      };
+
+      const dataUrl = await domtoimage.toPng(frameRef.current, {
+        quality: 1.0,
+        pixelRatio: window.devicePixelRatio || 4,
+        bgcolor: getDownloadBgColor(),
+        style: {
+          fontDisplay: 'block',
+          fontSmooth: 'always',
+          WebkitFontSmoothing: 'antialiased',
+          MozOsxFontSmoothing: 'grayscale',
+          borderRadius: '0px'
+        }
+      });
+
+      frameRef.current.style.borderRadius = originalBorderRadius;
+
+      const link = document.createElement('a');
+      const safeAppName = (customAppName || 'app-icon')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '') || 'download';
+        
+      link.download = `iconcraft-mockup-${safeAppName}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error) {
+      if (frameRef.current) {
+        frameRef.current.style.borderRadius = '30px';
+      }
+      console.error('Download failed:', error);
+      alert('Download failed. Please try again.');
+    }
+  };
+
+  const controlProps = {
+    customAppName, setCustomAppName,
+    handleIconClick, fileInputRef, handleFileChange,
+    customAppIcon,
+    edgeHighlighting, setEdgeHighlighting,
+    containerStyle, setContainerStyle,
+    solidColor, setSolidColor,
+    palette,
+    meshColors, setMeshColors,
+    selectedMesh, setSelectedMesh,
+    wallpaperOptions, base,
+    selectedWallpaper, setSelectedWallpaper,
+    wallpaperBgColor, setWallpaperBgColor,
+    wallpaperBlend, setWallpaperBlend,
+    viewMode, setViewMode,
+    focusMode, setFocusMode,
+    hideOtherIcons, setHideOtherIcons,
+    popularApps, handlePopularAppsToggle,
+    randomizeAppPositions,
+    deviceOptions, selectedDevice, setSelectedDevice,
+    deviceZoom, setDeviceZoom,
+    frameRatio, setFrameRatio,
+    ratioMap,
+    handleDownload
+  };
+
+  const MobileHeader = () => (
+    <div style={{
+      padding: '24px 24px 20px 24px',
+      width: '100%',
+      maxWidth: '500px',
+      margin: '0 auto',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        marginBottom: '16px'
+      }}>
+        <a href="https://iconcraft.app" target="_blank" rel="noopener" aria-label={t('returnHome')}>
+          <img 
+            src={`${base}logo.svg`} 
+            alt="Iconcraft Logo" 
+            style={{
+              width: '90px',
+              height: '45px',
+              objectFit: 'contain',
+              opacity: 0.95
+            }}
+          />
+        </a>
+      </div>
+      <h1 style={{
+        margin: '0 0 8px 0',
+        fontSize: '28px',
+        fontWeight: '700',
+        letterSpacing: '-0.02em',
+        color: '#2b2b2b',
+        fontFamily: SF_PRO_MEDIUM,
+        lineHeight: '1.4',
+        textAlign: 'center',
+        marginBottom: '12px',
+        opacity: 0.9
+      }}>
+        {t('title')}
+      </h1>
+      <p style={{
+        margin: '0',
+        fontSize: '14px',
+        color: '#666',
+        fontFamily: SF_PRO_REGULAR,
+        lineHeight: '1.4',
+        textAlign: 'center'
+      }}>
+        {t('description')}
+      </p>
+    </div>
+  );
+
+  return (
+    <>
+      <style>{globalStyles}</style>
+      <LanguageSwitcher />
+      <a href="#main-content" className="skip-link">{t('skipToMain')}</a>
+      
+      <div className="app-container" style={{
+        display: 'flex',
+        height: '100vh',
+        background: '#f8f9fa',
+        overflow: 'hidden',
+        flexDirection: isMobile ? 'column' : 'row'
+      }}>
+        {isMobile ? (
+          <MobileControls {...controlProps} snap={drawerSnap} setSnap={setDrawerSnap} />
+        ) : (
+          <aside role="complementary" aria-label="App customization controls">
+            <ControlsPanel {...controlProps} />
+          </aside>
+        )}
+
+        <main 
+          id="main-content"
+          className="main-content" 
+          ref={mainContentRef}
+          role="main"
+          aria-label="App icon mockup preview"
+          style={{
+            marginRight: isMobile ? '0' : '340px',
+            flex: 1,
+            height: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            padding: isMobile ? '20px 0' : '40px',
+            background: '#f8f9fa'
+          }}>
+          {isMobile && (
+            <AnimatePresence mode="wait">
+              {drawerSnap < 0.2 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -20, scale: 0.9 }}
+                  transition={{ 
+                    duration: 0.2, 
+                    ease: [0.25, 0.46, 0.45, 0.94],
+                    scale: { duration: 0.2 }
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 100
+                  }}
+                >
+                  <MobileHeader />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
+
+          {containerDims && (
+          <motion.div
+            ref={frameRef}
+            className="device-frame-container"
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ 
+              opacity: 1, 
+              scale: 1, 
+              y: isMobile ? (drawerSnap - 0.13) * -500 : 0
+            }}
+            role="img"
+            aria-label={`iPhone mockup displaying ${customAppName} app icon on iOS home screen`}
+            style={{
+              position: 'relative',
+              width: containerDims.width,
+              height: containerDims.height,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              overflow: 'hidden',
+              background: getContainerBackground(),
+              borderRadius: '30px',
+              padding: '20px',
+              transition: isResizing 
+                ? 'none' 
+                : 'background 0.7s cubic-bezier(.4,2,.6,1), width 0.3s ease, height 0.3s ease',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+              zIndex: 50
+            }}
+            transition={{
+              type: "tween",
+              duration: isResizing ? 0 : 0, 
+              ease: [0.25, 0.46, 0.45, 0.94]
+            }}
+          >
+          <div 
+            onMouseDown={handleDragStart}
+            onTouchStart={handleDragStart}
+            className="device-frame"
+            role="button"
+            aria-label="Drag to reposition iPhone mockup"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                setPosition(prev => ({ ...prev, x: prev.x - 10 }));
+              } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                setPosition(prev => ({ ...prev, x: prev.x + 10 }));
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setPosition(prev => ({ ...prev, y: prev.y - 10 }));
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setPosition(prev => ({ ...prev, y: prev.y + 10 }));
+              }
+            }}
+            style={{
+              position: 'relative',
+              width: `${frameSize.width}px`,
+              height: `${frameSize.height}px`,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              transition: isDragging 
+                ? 'none' 
+                : isResizing 
+                  ? 'width 0.3s ease, height 0.3s ease'
+                  : 'all 0.3s ease',
+              transform: `translate(${position.x}px, ${position.y}px) scale(${deviceZoom})`,
+              transformOrigin: (() => {
+                switch (viewMode) {
+                  case 'top-left': return 'top left';
+                  case 'top-right': return 'top right';
+                  case 'dock-left': return 'bottom left';
+                  case 'dock-right': return 'bottom right';
+                  default: return 'center';
+                }
+              })(),
+              cursor: isDragging ? 'grabbing' : 'grab',
+              userSelect: 'none',
+              marginLeft: viewMode === 'top-left' || viewMode === 'dock-left' ? '100px' : 0,
+              marginRight: viewMode === 'top-right' || viewMode === 'dock-right' ? '100px' : 0,
+              marginTop: viewMode === 'top-left' || viewMode === 'top-right' ? '100px' : 0,
+              marginBottom: viewMode === 'dock-left' || viewMode === 'dock-right' ? '100px' : 0,
+            }}
+          >
+            <div 
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                backgroundImage: `url("${deviceOptions[selectedDevice].image}")`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                pointerEvents: 'none',
+                zIndex: 2
+              }}
+              aria-hidden="true"
+            ></div>
+            
+            <div 
+              key={`screen-${selectedWallpaper}-${containerStyle}`}
+              className="device-screen" 
+              role="img"
+              aria-label="iOS home screen with app icons"
+              style={{
+                width: `${deviceOptions[selectedDevice].screenWidth * frameSize.scale}px`,
+                height: `${deviceOptions[selectedDevice].screenHeight * frameSize.scale}px`,
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                ...(containerStyle === 'wallpaper' ? {
+                  backgroundImage: getWallpaperBackground(),
+                  backgroundSize: wallpaperOptions.find(w => w.id === selectedWallpaper)?.backgroundSize || 'cover',
+                  backgroundPosition: wallpaperOptions.find(w => w.id === selectedWallpaper)?.backgroundPosition || 'center center',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundAttachment: 'scroll'
+                } : {
+                  background: getWallpaperBackground(),
+                  backgroundSize: 'initial',
+                  backgroundPosition: 'initial',
+                  backgroundRepeat: 'initial',
+                  backgroundAttachment: 'initial'
+                }),
+                borderRadius: `${55 * frameSize.scale}px`,
+                overflow: 'hidden',
+                zIndex: 1
+              }}>
+
+              {focusMode && (
+                <div 
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.75)',
+                    zIndex: 15,
+                    pointerEvents: 'none'
+                  }} 
+                  aria-hidden="true"
+                />
+              )}
+
+              <div 
+                style={{
+                  position: 'absolute',
+                  top: `${24 * getUIScale() * frameSize.scale}px`,
+                  left: '0',
+                  right: '0',
+                  height: `${22 * getUIScale() * frameSize.scale}px`,
+                  padding: '0',
+                  zIndex: 10
+                }}
+                role="img"
+                aria-label="iOS status bar showing 9:41 AM, signal strength, and battery level"
+              >
+                <svg width={deviceOptions[selectedDevice].screenWidth * frameSize.scale} height={22 * getUIScale() * frameSize.scale} viewBox={`0 0 ${deviceOptions[selectedDevice].screenWidth} 22`} fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <text x={61 * getUIScale()} y="17" fill="white" style={{ fontFamily: SF_PRO_MEDIUM, fontSize: `${17 * getUIScale()}px`, fontWeight: '600' }}>9:41</text>
+                  <g transform={`scale(${getUIScale()})`}>
+                    <path fillRule="evenodd" clipRule="evenodd" d="M307.865 6.03301C307.865 5.39996 307.388 4.88678 306.798 4.88678H305.732C305.143 4.88678 304.665 5.39996 304.665 6.03301V15.967C304.665 16.6 305.143 17.1132 305.732 17.1132H306.798C307.388 17.1132 307.865 16.6 307.865 15.967V6.03301ZM300.431 7.33206H301.498C302.087 7.33206 302.564 7.85756 302.564 8.5058V15.9395C302.564 16.5877 302.087 17.1132 301.498 17.1132H300.431C299.842 17.1132 299.364 16.5877 299.364 15.9395V8.5058C299.364 7.85756 299.842 7.33206 300.431 7.33206ZM296.099 9.98111H295.033C294.444 9.98111 293.966 10.5133 293.966 11.1698V15.9245C293.966 16.581 294.444 17.1132 295.033 17.1132H296.099C296.688 17.1132 297.166 16.581 297.166 15.9245V11.1698C297.166 10.5133 296.688 9.98111 296.099 9.98111ZM290.798 12.4264H289.732C289.143 12.4264 288.665 12.951 288.665 13.5981V15.9415C288.665 16.5886 289.143 17.1132 289.732 17.1132H290.798C291.388 17.1132 291.865 16.5886 291.865 15.9415V13.5981C291.865 12.951 291.388 12.4264 290.798 12.4264Z" fill="white"/>
+                    <path fillRule="evenodd" clipRule="evenodd" d="M323.436 7.30216C325.924 7.30226 328.316 8.22435 330.118 9.87783C330.254 10.0055 330.471 10.0039 330.604 9.87422L331.902 8.61075C331.97 8.54499 332.007 8.45591 332.007 8.36323C332.006 8.27055 331.967 8.18191 331.899 8.11691C327.168 3.7422 319.704 3.7422 314.973 8.11691C314.905 8.18186 314.866 8.27047 314.865 8.36316C314.865 8.45584 314.902 8.54494 314.97 8.61075L316.268 9.87422C316.401 10.0041 316.618 10.0057 316.754 9.87783C318.557 8.22424 320.949 7.30215 323.436 7.30216ZM323.433 11.5224C324.79 11.5223 326.099 12.0341 327.105 12.9582C327.242 13.0894 327.456 13.0865 327.589 12.9518L328.876 11.6325C328.944 11.5633 328.981 11.4694 328.98 11.3719C328.979 11.2743 328.94 11.1812 328.871 11.1134C325.807 8.2226 321.062 8.2226 317.998 11.1134C317.929 11.1812 317.89 11.2744 317.889 11.3719C317.888 11.4695 317.925 11.5634 317.993 11.6325L319.28 12.9518C319.413 13.0865 319.627 13.0894 319.763 12.9582C320.769 12.0347 322.077 11.523 323.433 11.5224ZM325.958 14.316C325.959 14.4213 325.922 14.5229 325.855 14.5967L323.678 17.0514C323.615 17.1236 323.528 17.1642 323.437 17.1642C323.346 17.1642 323.259 17.1236 323.195 17.0514L321.018 14.5967C320.951 14.5229 320.914 14.4212 320.916 14.3159C320.918 14.2105 320.959 14.1108 321.029 14.0402C322.419 12.7263 324.455 12.7263 325.845 14.0402C325.915 14.1108 325.956 14.2106 325.958 14.316Z" fill="white"/>
+                    <rect opacity="0.35" x="339.507" y="5" width="24" height="12" rx="3.8" stroke="white"/>
+                    <path opacity="0.4" d="M365.007 9.28113V13.3566C365.812 13.0114 366.335 12.2085 366.335 11.3189C366.335 10.4293 365.812 9.6263 365.007 9.28113" fill="white"/>
+                    <rect x="341.007" y="6.5" width="21" height="9" rx="2.5" fill="white"/>
+                  </g>
+                </svg>
+              </div>
+
+              <div 
+                style={{
+                  position: 'absolute',
+                  top: `${54 * getUIScale() * frameSize.scale}px`,
+                  left: '0',
+                  right: '0',
+                  bottom: '0',
+                  padding: `0 ${24 * getUIScale() * frameSize.scale}px`,
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}
+                role="group"
+                aria-label="iOS home screen app icons"
+              >
+                {renderAppGrid()}
+
+                <div style={{ flex: 1 }} />
+
+                <div>
+                  <div 
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'center',
+                      gap: `${6 * getUIScale() * frameSize.scale}px`,
+                      marginBottom: `${18 * getUIScale() * frameSize.scale}px`
+                    }}
+                    role="tablist"
+                    aria-label="Home screen pages"
+                  >
+                    <div 
+                      style={{
+                        width: `${5 * getUIScale() * frameSize.scale}px`,
+                        height: `${5 * getUIScale() * frameSize.scale}px`,
+                        borderRadius: '50%',
+                        background: 'white'
+                      }}
+                      role="tab"
+                      aria-selected="true"
+                      aria-label="Page 1 of 2, currently selected"
+                    ></div>
+                    <div 
+                      style={{
+                        width: `${5 * getUIScale() * frameSize.scale}px`,
+                        height: `${5 * getUIScale() * frameSize.scale}px`,
+                        borderRadius: '50%',
+                        background: 'rgba(255,255,255,0.3)'
+                      }}
+                      role="tab"
+                      aria-selected="false"
+                      aria-label="Page 2 of 2"
+                    ></div>
+                  </div>
+                  {renderDock()}
+                  <div style={{ height: `${32 * getUIScale() * frameSize.scale}px` }} />
+                </div>
+              </div>
+            </div>
+          </div>
+          </motion.div>
+        )}
+        </main>
+      </div>
+      
+
+      
+      {showCrop && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.9)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="crop-modal-title"
+          aria-describedby="crop-modal-description"
+        >
+          <div style={{
+            width: '90%',
+            maxWidth: '500px',
+            height: '600px',
+            background: '#1a1a1a',
+            borderRadius: '20px',
+            padding: '24px',
+            position: 'relative',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+          }}>
+            <h3 
+              id="crop-modal-title"
+              style={{
+                color: 'white',
+                margin: '0 0 20px 0',
+                fontSize: '20px',
+                fontWeight: '600',
+                fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif'
+              }}
+            >
+              {t('cropModal')}
+            </h3>
+            
+            <div 
+              id="crop-modal-description" 
+              className="sr-only"
+            >
+              {t('cropInstructions')}
+            </div>
+            
+            <div style={{
+              width: '100%',
+              height: '400px',
+              position: 'relative',
+              background: '#000',
+              borderRadius: '12px',
+              overflow: 'hidden'
+            }}>
+              <Cropper
+                image={rawIcon}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+                cropShape="rect"
+                showGrid={true}
+                style={{
+                  containerStyle: {
+                    width: '100%',
+                    height: '100%',
+                    backgroundColor: '#000'
+                  }
+                }}
+              />
+            </div>
+
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              marginTop: '20px',
+              padding: '0 10px'
+            }}>
+              <label 
+                htmlFor="zoom-slider"
+                style={{
+                  color: 'white',
+                  fontSize: '14px',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif'
+                }}
+              >
+                {t('zoom')}
+              </label>
+              <input
+                id="zoom-slider"
+                type="range"
+                min={1}
+                max={3}
+                step={0.01}
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                aria-valuetext={`${Math.round(zoom * 100)}% zoom`}
+                style={{
+                  flex: 1,
+                  height: '4px',
+                  WebkitAppearance: 'none',
+                  background: 'rgba(255,255,255,0.2)',
+                  borderRadius: '2px',
+                  outline: 'none'
+                }}
+              />
+              <span 
+                style={{
+                  color: 'white',
+                  fontSize: '14px',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+                  minWidth: '40px',
+                  textAlign: 'right'
+                }}
+                aria-live="polite"
+              >
+                {Math.round(zoom * 100)}%
+              </span>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '16px',
+              marginTop: '24px'
+            }}>
+              <button
+                onClick={() => setShowCrop(false)}
+                aria-label={t('cancel')}
+                style={{
+                  padding: '12px 24px',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                onClick={handleCropSave}
+                aria-label={t('saveIcon')}
+                style={{
+                  padding: '12px 24px',
+                  background: '#03B1FC',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {t('saveIcon')}
+              </button>
+            </div>
+
+            <div 
+              style={{
+                marginTop: '20px',
+                textAlign: 'center',
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: '13px',
+                fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif'
+              }}
+              role="note"
+              aria-label={t('cropInstructions')}
+            >
+              {t('cropTips')}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
