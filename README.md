@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/c46415ae-7383-4d03-8835-3e5ab16769cd
 ### Installation
 
 ```bash
-git clone https://github.com/sachinmotwani02/app-icon-mockup.git
+git clone https://github.com/xmbsm/App-Icon-Mockup.git
 cd app-icon-mockup
 npm install
 npm run dev
@@ -52,4 +52,4 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Related
 
-Part of the IconCraft(https://iconcraft.app/) design tool suite.
+Part of the IconCraft(https://kusheji.com/) design tool suite.
