@@ -34,7 +34,7 @@ export default function CustomAppIcon({
     position: 'absolute',
     top: 0, left: 0, width: '100%', height: '100%',
     pointerEvents: "none",
-    borderRadius: `${16 * scale}px`,
+    borderRadius: `${17 * scale}px`,
     padding: "1px",
     WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
     WebkitMaskComposite: "xor",
@@ -51,7 +51,7 @@ export default function CustomAppIcon({
       transition: 'filter 0.3s ease'
     }}>
       <Squircle 
-        cornerRadius={16 * scale} 
+        cornerRadius={17 * scale} 
         cornerSmoothing={1} 
         width={size} 
         height={size} 

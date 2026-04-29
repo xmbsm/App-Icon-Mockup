@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Cropper from 'react-easy-crop';
-import { getColor, getPalette } from 'colorthief';
+import { getColorSync, getPaletteSync } from 'colorthief';
 import { motion, AnimatePresence } from 'framer-motion';
 import domtoimage from 'dom-to-image-more';
 import ControlsPanel from './components/ControlsPanel';
@@ -196,10 +196,18 @@ export default function IOSHomeScreen() {
     img.crossOrigin = 'Anonymous';
     img.onload = () => {
       try {
-        const dominant = getColor(img);
-        const pal = getPalette(img, 6);
-        setPalette(pal);
-        const rgbToHex = ([r, g, b]) => '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+        const dominant = getColorSync(img);
+        const pal = getPaletteSync(img, { colorCount: 6 });
+        if (!dominant || !pal) {
+          throw new Error('Failed to extract colors');
+        }
+        // 将Color对象转换为RGB数组格式，保持与现有代码兼容
+        const palRgbArray = pal.map(c => {
+          const rgb = c.rgb();
+          return [rgb.r, rgb.g, rgb.b];
+        });
+        setPalette(palRgbArray);
+        const rgbToHex = (color) => color.hex();
         setSolidColor(lighten(rgbToHex(dominant), 0.5));
         if (pal.length >= 2 && rgbToHex(pal[0]) !== rgbToHex(pal[1])) {
           setGradientMain(rgbToHex(pal[0]));
@@ -212,7 +220,22 @@ export default function IOSHomeScreen() {
         while (mesh.length < 4) mesh.push(lighten(rgbToHex(dominant), 0.2 * mesh.length));
         setMeshColors(mesh);
         setWallpaperMeshColors(mesh);
-      } catch (e) {}
+      } catch (e) {
+        console.error('Error extracting colors:', e);
+        setSolidColor('#ededed');
+        setGradientMain('#ededed');
+        setGradientSecondary('#e0e0e0');
+        setMeshColors(['#ededed', '#e0e0e0', '#cccccc']);
+        setWallpaperMeshColors(['#ededed', '#e0e0e0', '#cccccc']);
+      }
+    };
+    img.onerror = (error) => {
+      console.error('Error loading image:', error);
+      setSolidColor('#ededed');
+      setGradientMain('#ededed');
+      setGradientSecondary('#e0e0e0');
+      setMeshColors(['#ededed', '#e0e0e0', '#cccccc']);
+      setWallpaperMeshColors(['#ededed', '#e0e0e0', '#cccccc']);
     };
     img.src = imageUrl;
   };
@@ -329,9 +352,15 @@ export default function IOSHomeScreen() {
 
   const handleCropSave = useCallback(async () => {
     if (!rawIcon || !croppedAreaPixels) return;
-    const croppedImgUrl = await getCroppedImg(rawIcon, croppedAreaPixels);
-    setCustomAppIcon(croppedImgUrl);
-    setShowCrop(false);
+    try {
+      const croppedImgUrl = await getCroppedImg(rawIcon, croppedAreaPixels);
+      setCustomAppIcon(croppedImgUrl);
+      setShowCrop(false);
+    } catch (error) {
+      console.error('Error saving cropped image:', error);
+      alert('保存图片失败，请重试');
+      setShowCrop(false);
+    }
   }, [rawIcon, croppedAreaPixels]);
 
   const handleIconClick = () => {

@@ -6,7 +6,7 @@ export default function AppIcon({ src, name, nolabel = false, size = 62, scale =
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <Squircle
-        cornerRadius={16 * scale}
+        cornerRadius={17 * scale}
         cornerSmoothing={1}
         width={size}
         height={size}
